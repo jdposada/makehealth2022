@@ -1,0 +1,239 @@
+---
+title: "Tutorial Patient Level Prediction (PLP)"
+output: html_document
+---
+
+Instalamos la ultima version del paquete
+
+`-d --net=host -e USER=ohdsi --restart always -e PASSWORD=ohdsi -v /home:/home/ohdsi/workdir odysseusinc/rstudio-ohdsi:latest`
+
+## Install PLP
+Create a folder to install the package
+
+```{r}
+r_lib <- "/home/ohdsi/workdir/ohdsi/r_lib"
+setwd("/home/ohdsi/workdir/ohdsi")
+dir.create(r_lib, showWarnings = TRUE, recursive = FALSE, mode = "0777")
+```
+Se eliminan los otros paquetes de `rlang` para evitar mezcla de versiones
+```{r}
+remove.packages("rlang", "/usr/local/lib/R/site-library")
+remove.packages("rlang", "/usr/local/lib/R/library")
+```
+
+Se instala rlang nuevamente
+
+```{r}
+install.packages("rlang", lib=r_lib, dependencies = FALSE)
+```
+
+```{r}
+remotes::install_github("OHDSI/PatientLevelPrediction", lib=r_lib)
+```
+
+Se instalan librerias adicionales para usar Shiny
+
+```{r}
+install.packages("shinydashboard", lib=r_lib)
+install.packages("shinycssloaders", lib=r_lib)
+install.packages("DT", lib=r_lib)
+install.packages("shinyWidgets", lib=r_lib)
+install.packages("plotly", lib=r_lib)
+
+```
+
+
+Ahora especificamos la libreria deseada en libpaths
+
+```{r}
+.libPaths(c(r_lib, .libPaths()))
+print(.libPaths())
+```
+
+
+```{r}
+library(dbplyr)
+outcomeIds <- 3
+cohortId <- 4
+washoutPeriod <- 364
+testFraction <- 0.25
+nfold <- 2
+connectionDetails <- Eunomia::getEunomiaConnectionDetails()
+connection <- DatabaseConnector::connect(connectionDetails)
+```
+
+```{r}
+DatabaseConnector::querySql(connection, "SELECT COUNT(*) FROM person;")
+```
+
+```{r}
+DatabaseConnector::getTableNames(connection, databaseSchema = 'main')
+```
+
+## Creamos las Cohortes de forma Automatica
+
+*In patients that started using NSAIDs for the first time, predict who will develop a gastrointestinal (GI) bleed in the next year*
+
+
+```{r}
+Eunomia::createCohorts(connectionDetails)
+```
+- Usando el codigo desde ATLAS
+
+
+Definimos los detalles de la base de datos a usar
+
+```{r}
+databaseDetails <- PatientLevelPrediction::createDatabaseDetails(connectionDetails = connectionDetails,
+                                                                 cdmDatabaseName = "main",
+                                                                 cdmDatabaseSchema = "main",
+                                                                 tempEmulationSchema = "main",
+                                                                 cohortDatabaseSchema = "main",
+                                                                 cohortTable = "cohort",
+                                                                 outcomeDatabaseSchema = "main",
+                                                                 outcomeTable = "cohort",
+                                                                 cohortId = cohortId,
+                                                                 outcomeIds = outcomeIds,
+                                                                 cdmVersion = 5)
+```
+
+
+definimos los parametros de los features
+
+
+```{r}
+covariateSettings <- FeatureExtraction::createCovariateSettings(useDemographicsGender = TRUE,
+                                                                useDemographicsAge = TRUE,
+                                                                useConditionGroupEraLongTerm = TRUE,
+                                                                useConditionGroupEraAnyTimePrior = TRUE,
+                                                                useDrugGroupEraLongTerm = TRUE,
+                                                                useDrugGroupEraAnyTimePrior = TRUE,
+                                                                useVisitConceptCountLongTerm = TRUE,
+                                                                longTermStartDays = -365,
+                                                                endDays = -1)
+
+```
+
+
+Definimos a la poblacion
+
+```{r}
+populationSettings <- PatientLevelPrediction::createStudyPopulationSettings(binary = T,
+                                                                            includeAllOutcomes = T,
+                                                                            firstExposureOnly = FALSE,
+                                                                            washoutPeriod = washoutPeriod,
+                                                                            removeSubjectsWithPriorOutcome = TRUE,
+                                                                            priorOutcomeLookback = 99999,
+                                                                            requireTimeAtRisk = T,
+                                                                            minTimeAtRisk = 364,
+                                                                            riskWindowStart = 1,
+                                                                            riskWindowEnd = 365,
+                                                                            startAnchor = "cohort start",
+                                                                            endAnchor = "cohort start",
+                                                                            restrictTarToCohortEnd = F)
+```
+
+
+definimos las restricciones del estudio
+
+```{r}
+restrictPlpDataSettings <- PatientLevelPrediction::createRestrictPlpDataSettings(studyStartDate = "19790101",
+                                                                                 studyEndDate = "21000101",
+                                                                                 firstExposureOnly = FALSE,
+                                                                                 washoutPeriod = washoutPeriod,
+                                                                                 sampleSize = NULL)
+```
+
+
+```{r}
+plpData <- PatientLevelPrediction::getPlpData(databaseDetails = databaseDetails,
+                                              covariateSettings = covariateSettings,
+                                              restrictPlpDataSettings = restrictPlpDataSettings)
+```
+
+
+```{r}
+summary(plpData)
+```
+
+Crear la poblacion de Estudio
+
+```{r}
+population <- PatientLevelPrediction::createStudyPopulation(plpData = plpData,
+                                                            outcomeId = outcomeIds,
+                                                            populationSettings)
+nrow(population)
+```
+
+Definimos el split para los datos
+
+
+```{r}
+splitSettings <- PatientLevelPrediction::createDefaultSplitSetting(type = "subject",
+                                                                   testFraction = 0.25,
+                                                                   splitSeed = 0, 
+                                                                   nfold = 2)
+```
+
+
+Definimos la estrategia de sampling: ninguna, sobremuestreo o submuestreo
+
+```{r}
+sampleSettings <- PatientLevelPrediction::createSampleSettings(type = "none")
+```
+
+Definimos la estrategia de preprocesamiento
+
+```{r}
+preprocessSettings <- PatientLevelPrediction::createPreprocessSettings(minFraction = 0.001, 
+                                                                       normalize = T,
+                                                                       removeRedundancy = TRUE)
+```
+
+```{r}
+featureEngineeringSettings <- PatientLevelPrediction::createFeatureEngineeringSettings(type = "none")
+executeSettings <- PatientLevelPrediction::createDefaultExecuteSettings()
+```
+
+
+Definimos el modelo con los parametros por default
+
+```{r}
+lassoModel <- PatientLevelPrediction::setLassoLogisticRegression(seed = 0)
+
+```
+
+
+Ahora entrenamos el modelo
+
+```{r}
+lassoResults <- PatientLevelPrediction::runPlp(plpData,
+                                               outcomeId = outcomeIds,
+                                               analysisId = 1,
+                                               analysisName = "Eunomia Test",
+                                               populationSettings = populationSettings,
+                                               splitSettings = splitSettings,
+                                               sampleSettings = sampleSettings,
+                                               featureEngineeringSettings = featureEngineeringSettings,
+                                               preprocessSettings = preprocessSettings,
+                                               modelSettings = lassoModel,
+                                               executeSettings = executeSettings,
+                                               saveDirectory = getwd())
+
+```
+
+## Resultados
+
+```{r}
+PatientLevelPrediction::viewPlp(lassoResults)
+```
+
+
+## Desconexion
+
+Finalmente nos desconectamos de la base de datos local
+
+```{r}
+DatabaseConnector::disconnect(connection)
+```
+
