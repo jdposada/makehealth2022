@@ -1,3 +1,5 @@
+![Make Health Logo](https://github.com/jdposada/makehealth2022/blob/main/logo.jpg)
+
 # Make Health Colombia 2022
 
 http://makehealthlatam.com/
