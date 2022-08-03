@@ -25,4 +25,4 @@ Si te interesa correr localmente RStudio despues del tutorial lo puedes hacer co
 
 Puedes encontrar mas informacion acerca de como instalar Docker en tu computador en este [link](https://www.docker.com/get-started/)
 
-`docker run -d --net=host -e USER=ohdsi --restart always -e PASSWORD=ohdsi -v <directorio_local>:/home/ohdsi/workdir odysseusinc/rstudio-ohdsi:latest`
+`docker run -d --net=host -e ROOT=true --restart always -e PASSWORD=ohdsi -v <directorio_local>:/home/ohdsi/workdir odysseusinc/rstudio-ohdsi:latest`
