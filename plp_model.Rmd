@@ -1,53 +1,14 @@
 ---
-title: "Tutorial Patient Level Prediction (PLP)"
+title: "Tutorial OHDSI Patient Level Prediction (PLP)"
 output: html_document
 ---
 
-Instalamos la ultima version del paquete
-
-`-d --net=host -e USER=ohdsi --restart always -e PASSWORD=ohdsi -v /home:/home/ohdsi/workdir odysseusinc/rstudio-ohdsi:latest`
-
-## Install PLP
-Create a folder to install the package
 
 ```{r}
 r_lib <- "/home/ohdsi/workdir/ohdsi/r_lib"
 setwd("/home/ohdsi/workdir/ohdsi")
-dir.create(r_lib, showWarnings = TRUE, recursive = FALSE, mode = "0777")
-```
-Se eliminan los otros paquetes de `rlang` para evitar mezcla de versiones
-```{r}
-remove.packages("rlang", "/usr/local/lib/R/site-library")
-remove.packages("rlang", "/usr/local/lib/R/library")
-```
-
-Se instala rlang nuevamente
-
-```{r}
-install.packages("rlang", lib=r_lib, dependencies = FALSE)
-```
-
-```{r}
-remotes::install_github("OHDSI/PatientLevelPrediction", lib=r_lib)
-```
-
-Se instalan librerias adicionales para usar Shiny
-
-```{r}
-install.packages("shinydashboard", lib=r_lib)
-install.packages("shinycssloaders", lib=r_lib)
-install.packages("DT", lib=r_lib)
-install.packages("shinyWidgets", lib=r_lib)
-install.packages("plotly", lib=r_lib)
-
-```
-
-
-Ahora especificamos la libreria deseada en libpaths
-
-```{r}
-.libPaths(c(r_lib, .libPaths()))
-print(.libPaths())
+Sys.setenv(R_LIBS_USER = r_lib)
+.libPaths(r_lib)
 ```
 
 
@@ -58,11 +19,13 @@ cohortId <- 4
 washoutPeriod <- 364
 testFraction <- 0.25
 nfold <- 2
-connectionDetails <- Eunomia::getEunomiaConnectionDetails()
-connection <- DatabaseConnector::connect(connectionDetails)
 ```
 
+Nos conectamos a la base de datos de ejemplo y corremos un query de prueba
+
 ```{r}
+connectionDetails <- Eunomia::getEunomiaConnectionDetails()
+connection <- DatabaseConnector::connect(connectionDetails)
 DatabaseConnector::querySql(connection, "SELECT COUNT(*) FROM person;")
 ```
 
@@ -172,7 +135,7 @@ Definimos el split para los datos
 splitSettings <- PatientLevelPrediction::createDefaultSplitSetting(type = "subject",
                                                                    testFraction = 0.25,
                                                                    splitSeed = 0, 
-                                                                   nfold = 2)
+                                                                   nfold = 3)
 ```
 
 
@@ -209,7 +172,7 @@ Ahora entrenamos el modelo
 ```{r}
 lassoResults <- PatientLevelPrediction::runPlp(plpData,
                                                outcomeId = outcomeIds,
-                                               analysisId = 1,
+                                               analysisId = "logistic",
                                                analysisName = "Eunomia Test",
                                                populationSettings = populationSettings,
                                                splitSettings = splitSettings,
@@ -226,6 +189,35 @@ lassoResults <- PatientLevelPrediction::runPlp(plpData,
 
 ```{r}
 PatientLevelPrediction::viewPlp(lassoResults)
+```
+
+## XG-BOOST
+
+```{r}
+xgboostModel <- PatientLevelPrediction::setGradientBoostingMachine(ntrees = c(5,10,50,100), 
+                                                                   nthread = 4,
+                                                                   maxDepth = c(2,4,6,10), 
+                                                                   learnRate = c(0.1,0.3),
+                                                                   seed = 123)
+```
+
+
+```{r}
+xgboostResults <- PatientLevelPrediction::runPlp(plpData,
+                                               outcomeId = outcomeIds,
+                                               analysisId = "xgboost",
+                                               analysisName = "Eunomia Test",
+                                               populationSettings = populationSettings,
+                                               splitSettings = splitSettings,
+                                               sampleSettings = sampleSettings,
+                                               featureEngineeringSettings = featureEngineeringSettings,
+                                               preprocessSettings = preprocessSettings,
+                                               modelSettings = xgboostModel,
+                                               executeSettings = executeSettings,
+                                               saveDirectory = getwd())
+```
+```{r}
+PatientLevelPrediction::viewPlp(xgboostResults)
 ```
 
 
