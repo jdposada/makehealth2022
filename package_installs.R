@@ -1,0 +1,15 @@
+r_lib <- "/home/ohdsi/workdir/ohdsi/r_lib"
+Sys.setenv(R_LIBS_USER = r_lib)
+.libPaths(r_lib)
+dir.create(r_lib, showWarnings = TRUE, recursive = FALSE, mode = "0777")
+remove.packages("rlang", "/usr/local/lib/R/site-library")
+remove.packages("rlang", "/usr/local/lib/R/library")
+install.packages("rlang", lib=r_lib)
+install.packages("shiny", lib=r_lib)
+install.packages("shinydashboard", lib=r_lib)
+install.packages("shinycssloaders", lib=r_lib)
+install.packages("DT", lib=r_lib)
+install.packages("shinyWidgets", lib=r_lib)
+install.packages("plotly", lib=r_lib)
+remotes::install_github("OHDSI/PatientLevelPrediction", lib=r_lib)
+
