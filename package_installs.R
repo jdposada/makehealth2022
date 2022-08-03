@@ -11,5 +11,6 @@ install.packages("shinycssloaders", lib=r_lib)
 install.packages("DT", lib=r_lib)
 install.packages("shinyWidgets", lib=r_lib)
 install.packages("plotly", lib=r_lib)
+install.packages("rmarkdown", lib=r_lib)
 remotes::install_github("OHDSI/PatientLevelPrediction", lib=r_lib)
-
+install.packages("xgboost", lib=r_lib)
