@@ -10,8 +10,6 @@ En este Rmarkdown vamos a entrenar un modelo predictivo con datos que se encuent
 Primero tenemos que alistar el entorno, cargar una librería y definir unos parametros que van a hacer usados posteriormente. 
 
 ```{r}
-library(dbplyr)
-
 r_lib <- "/home/ohdsi/workdir/ohdsi/r_lib"
 setwd("/home/ohdsi/workdir/ohdsi")
 Sys.setenv(R_LIBS_USER = r_lib)
@@ -22,6 +20,10 @@ cohortId <- 4
 washoutPeriod <- 364
 testFraction <- 0.25
 nfold <- 2
+```
+
+```{r}
+library(dbplyr)
 ```
 
 ## 2. Conexión a la base de datos de ejemplo Eunomia
