@@ -3,17 +3,20 @@ title: "Tutorial OHDSI Patient Level Prediction (PLP)"
 output: html_document
 ---
 
+En este Rmarkdown vamos a entrenar un modelo predictivo con datos que se encuentran en el formato OMOP-CDM v5.3.1. Los datos que vamos a utilizar son datos sintéticos generados con [Synthea](https://synthea.mitre.org/). Dichos datos fueron transformados al OMOP-CDM utilizando software disponible en [este repositorio](https://github.com/OHDSI/ETL-Synthea) de GitHub. De los datos transformados se tomo un subconjunto muy pequeño que se utiliza desde un paquete de R llamado [Eunomia](https://github.com/OHDSI/Eunomia). 
+
+## 1. Entorno
+
+Primero tenemos que alistar el entorno, cargar una librería y definir unos parametros que van a hacer usados posteriormente. 
 
 ```{r}
+library(dbplyr)
+
 r_lib <- "/home/ohdsi/workdir/ohdsi/r_lib"
 setwd("/home/ohdsi/workdir/ohdsi")
 Sys.setenv(R_LIBS_USER = r_lib)
 .libPaths(r_lib)
-```
 
-
-```{r}
-library(dbplyr)
 outcomeIds <- 3
 cohortId <- 4
 washoutPeriod <- 364
@@ -21,7 +24,11 @@ testFraction <- 0.25
 nfold <- 2
 ```
 
-Nos conectamos a la base de datos de ejemplo y corremos un query de prueba
+## 2. Conexión a la base de datos de ejemplo Eunomia
+
+De aquí en adelante utilizamos *lazy loading* para no cargar directamente las librerias sino usar los metodos llamandolas. Esto se hace escribiendo el nombre del paquete seguido de dos puntos.
+
+Eunomia es una base de datos en SQL Lite. Primero nos conectamos a la base de datos y después ejecutamos un query para comprobar que todo esta funcionando.
 
 ```{r}
 connectionDetails <- Eunomia::getEunomiaConnectionDetails()
@@ -29,22 +36,32 @@ connection <- DatabaseConnector::connect(connectionDetails)
 DatabaseConnector::querySql(connection, "SELECT COUNT(*) FROM person;")
 ```
 
+Miremos todas las tablas que tiene la base de datos
+
 ```{r}
 DatabaseConnector::getTableNames(connection, databaseSchema = 'main')
 ```
 
-## Creamos las Cohortes de forma Automatica
+Efectivamente podemos ver que las tablas que contiene hacen parte del esquema del OMOP-CDM
 
-*In patients that started using NSAIDs for the first time, predict who will develop a gastrointestinal (GI) bleed in the next year*
+## 3. Creamos las Cohortes
 
+Las cohortes que vamos a utilizar ya vienen creadas como parte de Eunomia. Para facilitar el proceso no vamos a usar las cohortes que creamos en ATLAS.
 
 ```{r}
 Eunomia::createCohorts(connectionDetails)
 ```
-- Usando el codigo desde ATLAS
 
+Esto crea las cohortes en la tabla COHORT. Lo podemos verificar con un query
 
-Definimos los detalles de la base de datos a usar
+```{r}
+DatabaseConnector::querySql(connection, "SELECT * FROM COHORT LIMIT 10;")
+```
+## 4. Configuracion de PLP
+
+### 4.1 Informacion de la base de datos
+
+Aqui definimos los detalles de la base de datos indicando como nos contecamos y en que esquemas se encuentra todo
 
 ```{r}
 databaseDetails <- PatientLevelPrediction::createDatabaseDetails(connectionDetails = connectionDetails,
@@ -61,8 +78,9 @@ databaseDetails <- PatientLevelPrediction::createDatabaseDetails(connectionDetai
 ```
 
 
-definimos los parametros de los features
+### 4.2 Definimos los Features
 
+Aqui definimos cuales features vamos a usar. En general los features creados son binarios indicando la presencia o no de un codigo en la ventana de tiempo escogida.
 
 ```{r}
 covariateSettings <- FeatureExtraction::createCovariateSettings(useDemographicsGender = TRUE,
@@ -77,8 +95,9 @@ covariateSettings <- FeatureExtraction::createCovariateSettings(useDemographicsG
 
 ```
 
+### 4.3 Definimos la Población
 
-Definimos a la poblacion
+Aquí empezamos a definir metodológicamente el estudio seleccionando paramétros como el TAR y la remoción de indiviuos con el outcome antes del index.
 
 ```{r}
 populationSettings <- PatientLevelPrediction::createStudyPopulationSettings(binary = T,
@@ -94,12 +113,7 @@ populationSettings <- PatientLevelPrediction::createStudyPopulationSettings(bina
                                                                             startAnchor = "cohort start",
                                                                             endAnchor = "cohort start",
                                                                             restrictTarToCohortEnd = F)
-```
 
-
-definimos las restricciones del estudio
-
-```{r}
 restrictPlpDataSettings <- PatientLevelPrediction::createRestrictPlpDataSettings(studyStartDate = "19790101",
                                                                                  studyEndDate = "21000101",
                                                                                  firstExposureOnly = FALSE,
@@ -107,19 +121,21 @@ restrictPlpDataSettings <- PatientLevelPrediction::createRestrictPlpDataSettings
                                                                                  sampleSize = NULL)
 ```
 
+### 4.4 Obtenemos los datos
+
+Es aquí donde finalmente accedemos a la base de datos y nos traemos parte de los datos en memoria
 
 ```{r}
 plpData <- PatientLevelPrediction::getPlpData(databaseDetails = databaseDetails,
                                               covariateSettings = covariateSettings,
                                               restrictPlpDataSettings = restrictPlpDataSettings)
-```
-
-
-```{r}
 summary(plpData)
 ```
 
-Crear la poblacion de Estudio
+### 4.5 Creamos la población de estudio
+
+Es aquí donde se define quien es el target y quien es el outcome para el estudio en particular.
+
 
 ```{r}
 population <- PatientLevelPrediction::createStudyPopulation(plpData = plpData,
@@ -128,7 +144,10 @@ population <- PatientLevelPrediction::createStudyPopulation(plpData = plpData,
 nrow(population)
 ```
 
-Definimos el split para los datos
+
+### 4.6 Se define la partición de los datos para la evaluación
+
+Aquí definimos la proporción que corresponderá para datos de entrenamiento y prueba así como el número de folds para el CV en los datos de entrenamiento
 
 
 ```{r}
@@ -136,38 +155,33 @@ splitSettings <- PatientLevelPrediction::createDefaultSplitSetting(type = "subje
                                                                    testFraction = 0.25,
                                                                    splitSeed = 0, 
                                                                    nfold = 3)
-```
 
-
-Definimos la estrategia de sampling: ninguna, sobremuestreo o submuestreo
-
-```{r}
 sampleSettings <- PatientLevelPrediction::createSampleSettings(type = "none")
 ```
 
-Definimos la estrategia de preprocesamiento
+### 4.7 Se define la estrategia de preprocesamiento
+
+Es aquí donde se define si se remueve algun feature por tener muy baja prevalencia, remover features redundantes y normalizar.
 
 ```{r}
 preprocessSettings <- PatientLevelPrediction::createPreprocessSettings(minFraction = 0.001, 
                                                                        normalize = T,
                                                                        removeRedundancy = TRUE)
-```
 
-```{r}
 featureEngineeringSettings <- PatientLevelPrediction::createFeatureEngineeringSettings(type = "none")
 executeSettings <- PatientLevelPrediction::createDefaultExecuteSettings()
 ```
 
+### 4.8 Definimos el primer modelo
 
-Definimos el modelo con los parametros por default
+En este caso usaremos en primera instancia un modelo de regresión logística con penalización Lasso. Son excelentes y muy competitivos como vamos a poder ver incluso en este ejemplo. 
 
 ```{r}
 lassoModel <- PatientLevelPrediction::setLassoLogisticRegression(seed = 0)
 
 ```
 
-
-Ahora entrenamos el modelo
+#### Entrenamos el modelo
 
 ```{r}
 lassoResults <- PatientLevelPrediction::runPlp(plpData,
@@ -185,13 +199,15 @@ lassoResults <- PatientLevelPrediction::runPlp(plpData,
 
 ```
 
-## Resultados
+#### Visualizamos los resultados
 
 ```{r}
 PatientLevelPrediction::viewPlp(lassoResults)
 ```
 
-## XG-BOOST
+### 4.9 Definimos nuestro segundo modelo: XG-BOOST
+
+XG-Boost es uno de los modelos más competitivos cuando se trata de datos tabulares. Ha ganado múltiples competencias en Kaggle. Aquí lo colocamos a prueba con un disclaimer: *No lo optimizamos*
 
 ```{r}
 xgboostModel <- PatientLevelPrediction::setGradientBoostingMachine(ntrees = c(5,10,50,100), 
@@ -199,10 +215,6 @@ xgboostModel <- PatientLevelPrediction::setGradientBoostingMachine(ntrees = c(5,
                                                                    maxDepth = c(2,4,6,10), 
                                                                    learnRate = c(0.1,0.3),
                                                                    seed = 123)
-```
-
-
-```{r}
 xgboostResults <- PatientLevelPrediction::runPlp(plpData,
                                                outcomeId = outcomeIds,
                                                analysisId = "xgboost",
@@ -216,16 +228,15 @@ xgboostResults <- PatientLevelPrediction::runPlp(plpData,
                                                executeSettings = executeSettings,
                                                saveDirectory = getwd())
 ```
+
 ```{r}
 PatientLevelPrediction::viewPlp(xgboostResults)
 ```
 
+## 5. Desconexion
 
-## Desconexion
-
-Finalmente nos desconectamos de la base de datos local
+Finalmente nos desconectamos de la base de datos local. Esto es un paso muy importante para no dejar conexiones activas. No tan importante para una base de datos como SQL Lite pero si para otras como Postgres. 
 
 ```{r}
 DatabaseConnector::disconnect(connection)
 ```
-
